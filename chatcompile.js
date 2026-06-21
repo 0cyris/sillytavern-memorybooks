@@ -1,6 +1,6 @@
 import { chat, name1, name2 } from '../../../../script.js';
 import { getContext } from '../../../extensions.js';
-import { estimateTokens } from './utils.js';
+import { estimateTokens, stableHashString, getCurrentChatIntegrity } from './utils.js';
 import { t as __st_t_tag, translate } from '../../../i18n.js';
 
 /**
@@ -65,6 +65,11 @@ export function compileScene(sceneRequest) {
     }
     
     // Create metadata
+    // Chat-aware overlap fingerprints, captured here in the SOURCE chat's context
+    // (compileScene runs in the source chat for interactive memories and at
+    // queue-build time for background jobs, and is snapshotted into the job).
+    // The boundary hashes use the raw marker messages so they line up with the
+    // STMB_start/STMB_end indices read back at overlap-check time.
     const metadata = {
         sceneStart,
         sceneEnd,
@@ -76,7 +81,10 @@ export function compileScene(sceneRequest) {
         messagesSkipped: skippedMessageCount,
         compiledAt: new Date().toISOString(),
         totalChatLength: chat.length,
-        userName: name1 || translate('User', 'chatcompile.defaults.user')
+        userName: name1 || translate('User', 'chatcompile.defaults.user'),
+        chatIntegrity: getCurrentChatIntegrity(),
+        startHash: stableHashString(chat[sceneStart]?.mes),
+        endHash: stableHashString(chat[sceneEnd]?.mes)
     };
     
     const compiledScene = {

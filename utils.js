@@ -11,6 +11,36 @@ import { translate } from '../../../i18n.js';
 const MODULE_NAME = 'STMemoryBooks-Utils';
 const $ = window.jQuery;
 
+/**
+ * Stable FNV-1a hash of a string, returned as an 8-char hex string.
+ * Used to fingerprint message content for chat-aware overlap detection.
+ * @param {*} value - Value to hash (coerced to string).
+ * @returns {string} 8-character hex hash.
+ */
+export function stableHashString(value) {
+    const text = String(value || '');
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Returns the current chat's stable integrity UUID, or null if unavailable.
+ * SillyTavern mints chat_metadata.integrity once on chat load and persists it
+ * (it survives renames). Used to scope overlap detection to the same chat.
+ * @returns {string|null}
+ */
+export function getCurrentChatIntegrity() {
+    try {
+        return getContext()?.chatMetadata?.integrity || chat_metadata?.integrity || null;
+    } catch {
+        return null;
+    }
+}
+
 // Prefer the first selector that exists in the DOM
 function pick$(...selectors) {
     for (const s of selectors) {

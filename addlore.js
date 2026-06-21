@@ -620,7 +620,20 @@ function populateLorebookEntry(entry, memoryResult, entryTitle, lorebookSettings
             entry.STMB_end = parseInt(rangeParts[1], 10);
         }
     }
-    
+
+    // Chat-aware overlap fingerprints: identity (integrity) + boundary-message
+    // hashes, used to scope overlap detection to the same conversation. Stamped
+    // only when present so legacy/edited entries degrade gracefully.
+    if (typeof memoryResult.metadata?.chatIntegrity === 'string' && memoryResult.metadata.chatIntegrity) {
+        entry.STMB_chatIntegrity = memoryResult.metadata.chatIntegrity;
+    }
+    if (typeof memoryResult.metadata?.startHash === 'string' && memoryResult.metadata.startHash) {
+        entry.STMB_startHash = memoryResult.metadata.startHash;
+    }
+    if (typeof memoryResult.metadata?.endHash === 'string' && memoryResult.metadata.endHash) {
+        entry.STMB_endHash = memoryResult.metadata.endHash;
+    }
+
 }
 
 /**

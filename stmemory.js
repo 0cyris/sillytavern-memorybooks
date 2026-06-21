@@ -1179,6 +1179,10 @@ export async function createMemory(compiledScene, profile, options = {}) {
             metadata: {
                 sceneRange: `${compiledScene.metadata.sceneStart}-${compiledScene.metadata.sceneEnd}`,
                 messageCount: compiledScene.metadata.messageCount,
+                // Chat-aware overlap fingerprints (captured in source chat by compileScene)
+                chatIntegrity: compiledScene.metadata.chatIntegrity ?? null,
+                startHash: compiledScene.metadata.startHash ?? null,
+                endHash: compiledScene.metadata.endHash ?? null,
                 characterName: compiledScene.metadata.characterName,
                 userName: compiledScene.metadata.userName,
                 chatId: compiledScene.metadata.chatId,

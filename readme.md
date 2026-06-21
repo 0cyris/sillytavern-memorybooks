@@ -556,7 +556,7 @@ Use **Reset to Default** in the prompt editor if you want to restore the built-i
 - **Manual Lorebook Mode:** Enable to select lorebooks per chat.
 - **Auto-create lorebook if none exists:** ⭐ *New in v4.2.0* - Automatically create and bind lorebooks using your naming template.
 - **Lorebook Name Template:** ⭐ *New in v4.2.0* - Customize auto-created lorebook names with {{char}}, {{user}}, {{chat}} placeholders.
-- **Allow Scene Overlap:** Permit or prevent overlapping memory ranges.
+- **Allow Scene Overlap:** Permit or prevent overlapping memory ranges. Overlap detection is chat-aware: a memory only blocks a new scene when it covers the *same messages* in the *same conversation*, so sharing a lorebook across different chats no longer triggers false overlaps. Branches and renamed chats are handled correctly. (Memories created before this update have no fingerprint and are still treated conservatively as overlaps until re-created.)
 - **Always Use Default Profile:** Skip confirmation popups.
 - **Show memory previews:** Enable preview popup to review and edit memories before adding to lorebook.
 - **Show Notifications:** Toggle toast messages.

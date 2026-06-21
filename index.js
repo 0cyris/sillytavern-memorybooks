@@ -101,6 +101,8 @@ import {
   markStmbPopup,
   throwIfStmbStopped,
   withGoBackButton,
+  stableHashString,
+  getCurrentChatIntegrity,
 } from "./utils.js";
 import * as SummaryPromptManager from "./summaryPromptManager.js";
 import {
@@ -2944,7 +2946,43 @@ async function buildQueuedMemoryJob(sceneData, lorebookValidation, effectiveSett
   };
 }
 
-function findOverlappingMemoryInLorebook(lorebookData, sceneData) {
+// Chat-aware overlap gate. An index-range intersection only counts as a real
+// overlap when the existing entry belongs to the same conversation as the scene
+// being added. We decide that from two cheap signals and never drop a real
+// same-message overlap:
+//   1. integrity match  -> same chat (rename-safe, edit-proof) -> overlap
+//   2. boundary-content -> existing entry's STMB_start/STMB_end messages still
+//      match the subject chat's messages at those indices (catches branches that
+//      share a message prefix but get a fresh integrity UUID).
+// verifyOverlapContent returns true/false when it can decide, null when it can't
+// (legacy entry without hashes, or the subject chat isn't loaded for inspection).
+function verifyOverlapContent(entry, subjectChat) {
+  if (!Array.isArray(subjectChat)) return null;
+  if (entry.STMB_startHash == null || entry.STMB_endHash == null) return null;
+  const startMsg = subjectChat[entry.STMB_start];
+  const endMsg = subjectChat[entry.STMB_end];
+  if (!startMsg || !endMsg) return null;
+  return (
+    stableHashString(startMsg.mes) === entry.STMB_startHash &&
+    stableHashString(endMsg.mes) === entry.STMB_endHash
+  );
+}
+
+// Returns true when an (already index-overlapping) entry is a real overlap.
+// Indeterminate cases resolve to true (conservative: never miss an overlap).
+function isRealOverlap(entry, subjectIntegrity, subjectChat) {
+  if (entry.STMB_chatIntegrity && subjectIntegrity) {
+    if (entry.STMB_chatIntegrity === subjectIntegrity) return true; // same chat
+    // Different integrity could still be a branch sharing this prefix.
+    const verified = verifyOverlapContent(entry, subjectChat);
+    return verified === null ? true : verified;
+  }
+  // No integrity to compare (legacy/old ST) -> rely on content, else conservative.
+  const verified = verifyOverlapContent(entry, subjectChat);
+  return verified === null ? true : verified;
+}
+
+function findOverlappingMemoryInLorebook(lorebookData, sceneData, subjectIntegrity = null, subjectChat = null) {
   const allMemories = identifyMemoryEntries(lorebookData);
   const ns = Number(sceneData.sceneStart);
   const ne = Number(sceneData.sceneEnd);
@@ -2953,7 +2991,7 @@ function findOverlappingMemoryInLorebook(lorebookData, sceneData) {
     if (!existingRange || existingRange.start === null || existingRange.end === null) continue;
     const s = Number(existingRange.start);
     const e = Number(existingRange.end);
-    if (ns <= e && ne >= s) {
+    if (ns <= e && ne >= s && isRealOverlap(mem.entry, subjectIntegrity, subjectChat)) {
       return { title: mem.title, start: s, end: e };
     }
   }
@@ -3112,7 +3150,13 @@ async function executeQueuedMemoryJob(job, jobContext) {
       throw new Error(`Lorebook "${lorebookName}" could not be loaded.`);
     }
     if (!settings.moduleSettings?.allowSceneOverlap) {
-      const overlap = findOverlappingMemoryInLorebook(freshLorebook, sceneData);
+      // The job's source chat may not be the active chat; only inspect message
+      // content when the source chat is actually loaded. Integrity comes from the
+      // snapshot captured in the source chat at queue time.
+      const sourceIsActive = getStmbChatKey(job.chatRef) === getStmbChatKey();
+      const subjectIntegrity = compiledScene?.metadata?.chatIntegrity || null;
+      const subjectChat = sourceIsActive ? chat : null;
+      const overlap = findOverlappingMemoryInLorebook(freshLorebook, sceneData, subjectIntegrity, subjectChat);
       if (overlap) {
         const error = new Error(`Scene overlaps with existing memory: "${overlap.title}" (messages ${overlap.start}-${overlap.end})`);
         error.name = "StmbJobNeedsReview";
@@ -3610,6 +3654,9 @@ async function initiateMemoryCreation(selectedProfileIndex = null) {
     const newEnd = sceneData.sceneEnd;
 
     if (!settings.moduleSettings.allowSceneOverlap) {
+      // Interactive path: the active chat is the source chat, so both the
+      // current integrity and the current message array are valid to inspect.
+      const subjectIntegrity = getCurrentChatIntegrity();
       for (const mem of allMemories) {
         const existingRange = getRangeFromMemoryEntry(mem.entry);
 
@@ -3622,11 +3669,13 @@ async function initiateMemoryCreation(selectedProfileIndex = null) {
           const e = Number(existingRange.end);
           const ns = Number(newStart);
           const ne = Number(newEnd);
+          const indexOverlap = ns <= e && ne >= s;
+          const realOverlap = indexOverlap && isRealOverlap(mem.entry, subjectIntegrity, chat);
           // Detailed overlap diagnostics
           console.debug(
-            `STMemoryBooks: OverlapCheck new=[${ns}-${ne}] existing="${mem.title}" [${s}-${e}] cond1(ns<=e)=${ns <= e} cond2(ne>=s)=${ne >= s}`,
+            `STMemoryBooks: OverlapCheck new=[${ns}-${ne}] existing="${mem.title}" [${s}-${e}] cond1(ns<=e)=${ns <= e} cond2(ne>=s)=${ne >= s} indexOverlap=${indexOverlap} sameChat=${mem.entry.STMB_chatIntegrity && subjectIntegrity ? mem.entry.STMB_chatIntegrity === subjectIntegrity : "n/a"} contentMatch=${verifyOverlapContent(mem.entry, chat)} realOverlap=${realOverlap}`,
           );
-          if (ns <= e && ne >= s) {
+          if (realOverlap) {
             console.error(
               `STMemoryBooks: Scene overlap detected with memory: ${mem.title} [${s}-${e}] vs new [${ns}-${ne}]`,
             );
@@ -8281,6 +8330,10 @@ async function applyManualFixedJson(correctedRaw) {
       metadata: {
         sceneRange,
         messageCount: compiledScene.metadata?.messageCount,
+        // Chat-aware overlap fingerprints (captured in source chat by compileScene)
+        chatIntegrity: compiledScene.metadata?.chatIntegrity ?? null,
+        startHash: compiledScene.metadata?.startHash ?? null,
+        endHash: compiledScene.metadata?.endHash ?? null,
         characterName: compiledScene.metadata?.characterName,
         userName: compiledScene.metadata?.userName,
         chatId: compiledScene.metadata?.chatId,
